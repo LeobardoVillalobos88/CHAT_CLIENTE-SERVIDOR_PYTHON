@@ -1,20 +1,30 @@
 import socket
+import ssl
 import hmac
 import hashlib
 import json
+import os
+from dotenv import load_dotenv
 
-HOST = '127.0.0.1'
-PORT = 5000
-SECRET_KEY = b"SergioLeobardoJassielCalebAlejandro"
+# CARGA DE VARIABLES DE ENTORNO
+load_dotenv()
+HOST = os.getenv("HOST", "127.0.0.1")
+PORT = int(os.getenv("PORT", 5000))
+SECRET_KEY = os.getenv("SECRET_KEY", "ClavePorDefecto").encode("utf-8")
 
+# CONFIGURACIÓN SSL/TLS
+context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+context.check_hostname = False       # Desactivado para entorno local
+context.verify_mode = ssl.CERT_NONE  # No se valida el certificado (autofirmado)
+
+# FUNCIONES AUXILIARES
 def firmar(msg: str) -> str:
     return hmac.new(SECRET_KEY, msg.encode('utf-8'), hashlib.sha256).hexdigest()
 
-# SHA-256 simple (checksum por mensaje)
 def sha256_hex(texto: str) -> str:
     return hashlib.sha256(texto.encode('utf-8')).hexdigest()
 
-def recibir_id(sock: socket.socket) -> int:
+def recibir_id(sock: ssl.SSLSocket) -> int:
     buffer = b""
     while b"\n" not in buffer:
         chunk = sock.recv(64)
@@ -29,16 +39,20 @@ def recibir_id(sock: socket.socket) -> int:
         pass
     return -1
 
+# PROGRAMA PRINCIPAL
 def main():
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect((HOST, PORT))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn = context.wrap_socket(sock, server_hostname=HOST)
+    conn.connect((HOST, PORT))
 
-    cid = recibir_id(client)
+    cid = recibir_id(conn)
     etiqueta = f"Cliente {cid}" if cid > 0 else "Cliente"
 
-    f = client.makefile('w', encoding='utf-8', newline='\n')
+    f = conn.makefile('w', encoding='utf-8', newline='\n')
 
-    print("Escribe (salir) para terminar de chatear: ")
+    print("Conexión segura establecida (SSL/TLS activo).")
+    print("Escribe (salir) para terminar el chat:")
+
     try:
         while True:
             mensaje = input(f"{etiqueta}: ")
@@ -46,8 +60,8 @@ def main():
                 break
             paquete = {
                 "msg": mensaje,
-                "sha": sha256_hex(mensaje),   # SHA por mensaje
-                "hmac": firmar(mensaje)       # Se mantiene HMAC (simétrico)
+                "sha": sha256_hex(mensaje),
+                "hmac": firmar(mensaje)
             }
             f.write(json.dumps(paquete) + "\n")
             f.flush()
@@ -56,7 +70,8 @@ def main():
             f.close()
         except Exception:
             pass
-        client.close()
+        conn.close()
+        print("Conexión cerrada.")
 
 if __name__ == "__main__":
     main()
