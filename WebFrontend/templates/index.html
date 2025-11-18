@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Seguro - Web</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Chat Seguro</h1>
+            <div class="estado">
+                <div class="estado-indicador" id="estadoIndicador"></div>
+                <span id="estadoTexto">Conectando...</span>
+            </div>
+        </div>
+
+        <div class="chat-area" id="chatArea"></div>
+
+        <div class="input-area">
+            <input 
+                type="text" 
+                id="mensajeInput" 
+                placeholder="Escribe tu mensaje aquí..." 
+                disabled
+            >
+            <button id="btnEnviar" disabled>Enviar</button>
+        </div>
+
+        <div class="seguridad-info">
+            Comunicación cifrada con SSL/TLS | Verificación HMAC-SHA256 | Integridad SHA-256
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const chatArea = document.getElementById('chatArea');
+        const mensajeInput = document.getElementById('mensajeInput');
+        const btnEnviar = document.getElementById('btnEnviar');
+        const estadoIndicador = document.getElementById('estadoIndicador');
+        const estadoTexto = document.getElementById('estadoTexto');
+
+        let conectado = false;
+        let miEtiqueta = 'Cliente';
+
+        // Agregar mensaje al chat
+        function agregarMensaje(texto, tipo = 'enviado') {
+            const mensajeDiv = document.createElement('div');
+            mensajeDiv.className = `mensaje ${tipo}`;
+            
+            if (tipo === 'sistema' || tipo === 'error') {
+                mensajeDiv.textContent = texto;
+            } else {
+                mensajeDiv.innerHTML = `
+                    <div>${texto}</div>
+                    <div class="mensaje-info">${new Date().toLocaleTimeString()}</div>
+                `;
+            }
+            
+            chatArea.appendChild(mensajeDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        // Eventos de Socket.IO
+        socket.on('connect', () => {
+            agregarMensaje('Conectando al servidor de chat...', 'sistema');
+        });
+
+        socket.on('conectado', (data) => {
+            conectado = true;
+            miEtiqueta = data.etiqueta;
+            estadoIndicador.classList.add('activo');
+            estadoTexto.textContent = `Conectado como ${miEtiqueta}`;
+            mensajeInput.disabled = false;
+            btnEnviar.disabled = false;
+            agregarMensaje(`✅ Conectado como ${miEtiqueta}`, 'sistema');
+            agregarMensaje('Conexión segura establecida (SSL/TLS activo)', 'sistema');
+            mensajeInput.focus();
+        });
+
+        socket.on('estado', (data) => {
+            if (!data.conectado) {
+                conectado = false;
+                estadoIndicador.classList.remove('activo');
+                estadoTexto.textContent = 'Desconectado';
+                mensajeInput.disabled = true;
+                btnEnviar.disabled = true;
+            }
+        });
+
+        socket.on('mensaje_enviado', (data) => {
+            agregarMensaje(`${data.etiqueta}: ${data.mensaje}`, 'enviado');
+        });
+
+        socket.on('mensaje_recibido', (data) => {
+            const timestamp = data.timestamp ? `[${data.timestamp}] ` : '';
+            agregarMensaje(`${timestamp}${data.etiqueta}: ${data.mensaje}`, 'recibido');
+        });
+
+        socket.on('error', (data) => {
+            agregarMensaje(data.mensaje, 'error');
+            conectado = false;
+            estadoIndicador.classList.remove('activo');
+            estadoTexto.textContent = 'Error de conexión';
+            mensajeInput.disabled = true;
+            btnEnviar.disabled = true;
+        });
+
+        socket.on('disconnect', () => {
+            conectado = false;
+            estadoIndicador.classList.remove('activo');
+            estadoTexto.textContent = 'Desconectado';
+            mensajeInput.disabled = true;
+            btnEnviar.disabled = true;
+            agregarMensaje('Desconectado del servidor', 'sistema');
+        });
+
+        // Enviar mensaje
+        function enviarMensaje() {
+            const mensaje = mensajeInput.value.trim();
+            if (!mensaje || !conectado) return;
+
+            socket.emit('enviar_mensaje', { mensaje: mensaje });
+            mensajeInput.value = '';
+        }
+
+        btnEnviar.addEventListener('click', enviarMensaje);
+        mensajeInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                enviarMensaje();
+            }
+        });
+    </script>
+</body>
+</html>
+
