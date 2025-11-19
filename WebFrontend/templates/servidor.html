@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vista del Servidor - Chat Seguro</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/servidor.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container servidor-container">
+        <div class="header servidor-header">
+            <h1>KRIPTEN - Servidor</h1>
+            <div class="estado">
+                <div class="estado-indicador" id="estadoIndicador"></div>
+                <span id="estadoTexto">Conectando...</span>
+            </div>
+        </div>
+
+        <div class="info-servidor">
+            <p>Visualización de todos los mensajes recibidos de todos los clientes</p>
+            <p class="modo-lectura">Modo solo lectura</p>
+        </div>
+
+        <div class="chat-area" id="chatArea"></div>
+    </div>
+
+    <script>
+        const socket = io();
+        const chatArea = document.getElementById('chatArea');
+        const estadoIndicador = document.getElementById('estadoIndicador');
+        const estadoTexto = document.getElementById('estadoTexto');
+
+        let conectado = false;
+
+        // Agregar mensaje al chat
+        function agregarMensaje(texto, tipo = 'sistema', clienteId = null, timestamp = null) {
+            const mensajeDiv = document.createElement('div');
+            mensajeDiv.className = `mensaje ${tipo}`;
+            
+            if (tipo === 'sistema' || tipo === 'error') {
+                mensajeDiv.textContent = texto;
+            } else {
+                const hora = timestamp ? `[${timestamp}]` : new Date().toLocaleTimeString();
+                mensajeDiv.innerHTML = `
+                    <div class="mensaje-cliente-id">Cliente ${clienteId}</div>
+                    <div class="mensaje-contenido">${texto}</div>
+                    <div class="mensaje-info">${hora}</div>
+                `;
+            }
+            
+            chatArea.appendChild(mensajeDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        // Eventos de Socket.IO
+        socket.on('connect', () => {
+            // Indicar que es modo servidor
+            socket.emit('establecer_modo', { modo_servidor: true });
+        });
+
+        socket.on('conectado', (data) => {
+            conectado = true;
+            estadoIndicador.classList.add('activo');
+            estadoTexto.textContent = 'Conectado - Modo servidor';
+        });
+
+        socket.on('estado', (data) => {
+            if (!data.conectado) {
+                conectado = false;
+                estadoIndicador.classList.remove('activo');
+                estadoTexto.textContent = 'Desconectado';
+            }
+        });
+
+        // Recibir TODOS los mensajes (sin filtrar)
+        socket.on('mensaje_recibido', (data) => {
+            agregarMensaje(
+                data.mensaje, 
+                'recibido', 
+                data.cliente_id, 
+                data.timestamp
+            );
+        });
+
+        // Los mensajes enviados por clientes también se reciben a través de mensaje_recibido
+        // cuando el servidor los reenvía a las sesiones en modo servidor
+
+        socket.on('error', (data) => {
+            agregarMensaje(data.mensaje, 'error');
+            conectado = false;
+            estadoIndicador.classList.remove('activo');
+            estadoTexto.textContent = 'Error de conexión';
+        });
+
+        socket.on('disconnect', () => {
+            conectado = false;
+            estadoIndicador.classList.remove('activo');
+            estadoTexto.textContent = 'Desconectado';
+            agregarMensaje('Desconectado del servidor', 'sistema');
+        });
+    </script>
+</body>
+</html>
+

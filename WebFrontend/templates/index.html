@@ -10,7 +10,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Chat Seguro</h1>
+            <h1>KRIPTEN</h1>
             <div class="estado">
                 <div class="estado-indicador" id="estadoIndicador"></div>
                 <span id="estadoTexto">Conectando...</span>
@@ -44,39 +44,55 @@
 
         let conectado = false;
         let miEtiqueta = 'Cliente';
+        let miClienteId = null;
+        let mensajesPendientes = new Map(); // Para rastrear mensajes pendientes de confirmación
 
         // Agregar mensaje al chat
-        function agregarMensaje(texto, tipo = 'enviado') {
+        function agregarMensaje(texto, tipo = 'enviado', timestamp = null, mensajeId = null) {
             const mensajeDiv = document.createElement('div');
             mensajeDiv.className = `mensaje ${tipo}`;
             
             if (tipo === 'sistema' || tipo === 'error') {
                 mensajeDiv.textContent = texto;
             } else {
+                const hora = timestamp || new Date().toLocaleTimeString();
+                const confirmacionDiv = tipo === 'enviado' ? 
+                    `<div class="confirmacion-envio" id="confirmacion-${mensajeId || Date.now()}">
+                        <span class="estado-envio">⏳</span>
+                        <span class="texto-confirmacion">Enviando...</span>
+                    </div>` : '';
+                
                 mensajeDiv.innerHTML = `
-                    <div>${texto}</div>
-                    <div class="mensaje-info">${new Date().toLocaleTimeString()}</div>
+                    <div class="mensaje-contenido">${texto}</div>
+                    ${confirmacionDiv}
+                    <div class="mensaje-info">${hora}</div>
                 `;
+                
+                // Guardar referencia si es un mensaje enviado pendiente
+                if (tipo === 'enviado' && mensajeId) {
+                    mensajesPendientes.set(mensajeId, mensajeDiv);
+                }
             }
             
             chatArea.appendChild(mensajeDiv);
             chatArea.scrollTop = chatArea.scrollHeight;
+            return mensajeDiv;
         }
 
         // Eventos de Socket.IO
         socket.on('connect', () => {
-            agregarMensaje('Conectando al servidor de chat...', 'sistema');
+            // Indicar que es modo cliente
+            socket.emit('establecer_modo', { modo_servidor: false });
         });
 
         socket.on('conectado', (data) => {
             conectado = true;
             miEtiqueta = data.etiqueta;
+            miClienteId = data.id;
             estadoIndicador.classList.add('activo');
             estadoTexto.textContent = `Conectado como ${miEtiqueta}`;
             mensajeInput.disabled = false;
             btnEnviar.disabled = false;
-            agregarMensaje(`✅ Conectado como ${miEtiqueta}`, 'sistema');
-            agregarMensaje('Conexión segura establecida (SSL/TLS activo)', 'sistema');
             mensajeInput.focus();
         });
 
@@ -91,12 +107,42 @@
         });
 
         socket.on('mensaje_enviado', (data) => {
-            agregarMensaje(`${data.etiqueta}: ${data.mensaje}`, 'enviado');
+            // Solo mostrar nuestros propios mensajes enviados
+            const mensajeId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            agregarMensaje(data.mensaje, 'enviado', data.timestamp, mensajeId);
         });
 
         socket.on('mensaje_recibido', (data) => {
-            const timestamp = data.timestamp ? `[${data.timestamp}] ` : '';
-            agregarMensaje(`${timestamp}${data.etiqueta}: ${data.mensaje}`, 'recibido');
+            // NO mostrar mensajes de otros clientes - solo nuestros propios
+            // Este evento no debería dispararse en modo cliente, pero por seguridad lo ignoramos
+        });
+
+        socket.on('mensaje_confirmado', (data) => {
+            // Actualizar confirmación de envío tipo WhatsApp
+            // Buscar el último mensaje pendiente que coincida con el contenido
+            let mensajeEncontrado = null;
+            let mensajeIdEncontrado = null;
+            
+            for (const [id, div] of mensajesPendientes.entries()) {
+                const contenido = div.querySelector('.mensaje-contenido');
+                if (contenido && contenido.textContent.trim() === data.mensaje.trim()) {
+                    mensajeEncontrado = div;
+                    mensajeIdEncontrado = id;
+                    break;
+                }
+            }
+            
+            if (mensajeEncontrado) {
+                const confirmacionDiv = mensajeEncontrado.querySelector('.confirmacion-envio');
+                if (confirmacionDiv) {
+                    confirmacionDiv.innerHTML = `
+                        <span class="estado-envio">✓</span>
+                        <span class="texto-confirmacion">Mensaje enviado correctamente</span>
+                    `;
+                    confirmacionDiv.classList.add('confirmado');
+                }
+                mensajesPendientes.delete(mensajeIdEncontrado);
+            }
         });
 
         socket.on('error', (data) => {
@@ -122,6 +168,7 @@
             const mensaje = mensajeInput.value.trim();
             if (!mensaje || !conectado) return;
 
+            // El mensaje se mostrará cuando se reciba la confirmación 'mensaje_enviado'
             socket.emit('enviar_mensaje', { mensaje: mensaje });
             mensajeInput.value = '';
         }

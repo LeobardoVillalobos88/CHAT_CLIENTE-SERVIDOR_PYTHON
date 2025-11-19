@@ -70,6 +70,10 @@ Abre tu navegador web (Chrome, Firefox, Edge, etc.) y ve a:
 
     http://localhost:8080
 
+Para abrir la interfaz del servidor ve a:
+
+    http://localhost:8080/servidor
+
 Veras la interfaz del chat seguro.
 
 ================================================================================

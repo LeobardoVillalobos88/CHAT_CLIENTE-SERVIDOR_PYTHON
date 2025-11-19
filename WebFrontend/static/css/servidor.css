@@ -1,0 +1,56 @@
+/* Estilos específicos para la vista del servidor */
+.servidor-container {
+    max-width: 1000px;
+}
+
+.servidor-header {
+    background-color: #313131;
+}
+
+.info-servidor {
+    background: #424242;
+    padding: 15px 20px;
+    text-align: center;
+    color: #ffffff;
+    border-bottom: 2px solid #616161;
+}
+
+.info-servidor p {
+    margin: 5px 0;
+    font-size: 14px;
+}
+
+.modo-lectura {
+    font-weight: bold;
+    color: #ffc107 !important;
+    font-size: 12px !important;
+}
+
+.mensaje.recibido {
+    background: #e3f2fd;
+    color: #1565c0;
+    border-left: 4px solid #1976d2;
+    margin: 10px auto;
+    max-width: 85%;
+}
+
+.mensaje-cliente-id {
+    font-weight: bold;
+    font-size: 12px;
+    margin-bottom: 5px;
+    color: #0d47a1;
+    text-transform: uppercase;
+}
+
+.mensaje-contenido {
+    font-size: 15px;
+    line-height: 1.4;
+}
+
+.mensaje-info {
+    font-size: 11px;
+    opacity: 0.7;
+    margin-top: 5px;
+    text-align: right;
+}
+

@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import threading
+from datetime import datetime
 from dotenv import load_dotenv
 
 # CARGA DE VARIABLES DE ENTORNO
@@ -61,6 +62,7 @@ def recibir_mensajes_chat(session_id):
     
     cliente = clientes_web[session_id]
     file_reader = cliente.get('file_reader')
+    modo_servidor = cliente.get('modo_servidor', False)
     if not file_reader:
         return
     
@@ -78,14 +80,23 @@ def recibir_mensajes_chat(session_id):
                     mensaje = paquete.get("mensaje", "")
                     timestamp = paquete.get("timestamp", "")
                     
-                    # Solo reenviar si no es nuestro propio mensaje
-                    if cliente_id != cliente['cid']:
+                    if modo_servidor:
+                        # Modo servidor: recibir TODOS los mensajes (incluyendo del remitente)
                         socketio.emit('mensaje_recibido', {
                             'cliente_id': cliente_id,
                             'etiqueta': f"Cliente {cliente_id}",
                             'mensaje': mensaje,
                             'timestamp': timestamp
                         }, room=session_id)
+                    else:
+                        # Modo cliente: solo recibir mensajes de otros clientes (no propios)
+                        if cliente_id != cliente['cid']:
+                            socketio.emit('mensaje_recibido', {
+                                'cliente_id': cliente_id,
+                                'etiqueta': f"Cliente {cliente_id}",
+                                'mensaje': mensaje,
+                                'timestamp': timestamp
+                            }, room=session_id)
             except json.JSONDecodeError:
                 continue
     except Exception as e:
@@ -93,7 +104,7 @@ def recibir_mensajes_chat(session_id):
             socketio.emit('error', {'mensaje': f"Error al recibir: {str(e)}"}, room=session_id)
             desconectar_del_servidor_chat(session_id)
 
-def conectar_al_servidor_chat(session_id):
+def conectar_al_servidor_chat(session_id, modo_servidor=False):
     """Conecta al servidor de chat y mantiene la conexión"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -109,7 +120,8 @@ def conectar_al_servidor_chat(session_id):
             'file_writer': file_writer,
             'file_reader': file_reader,
             'cid': cid,
-            'etiqueta': f"Cliente {cid}" if cid > 0 else "Cliente"
+            'etiqueta': f"Cliente {cid}" if cid > 0 else "Cliente",
+            'modo_servidor': modo_servidor
         }
         
         # Iniciar hilo para recibir mensajes
@@ -150,18 +162,33 @@ def desconectar_del_servidor_chat(session_id):
 def index():
     return render_template('index.html')
 
+@app.route('/servidor')
+def servidor():
+    return render_template('servidor.html')
+
 # WEBSOCKET EVENTS
 @socketio.on('connect')
 def handle_connect():
     """Cuando un cliente web se conecta"""
     session_id = request.sid
+    # Inicialmente no sabemos el modo, se establecerá cuando el cliente envíe el evento 'establecer_modo'
     print(f"[WEB] Cliente conectado: {session_id}")
+
+@socketio.on('establecer_modo')
+def handle_establecer_modo(data):
+    """Establece el modo (servidor o cliente) para esta sesión"""
+    session_id = request.sid
+    modo_servidor = data.get('modo_servidor', False)
     
-    # Conectar al servidor de chat
-    if conectar_al_servidor_chat(session_id):
-        emit('estado', {'conectado': True})
+    # Si ya está conectado, actualizar el modo
+    if session_id in clientes_web:
+        clientes_web[session_id]['modo_servidor'] = modo_servidor
     else:
-        emit('estado', {'conectado': False})
+        # Conectar al servidor de chat con el modo especificado
+        if conectar_al_servidor_chat(session_id, modo_servidor=modo_servidor):
+            emit('estado', {'conectado': True})
+        else:
+            emit('estado', {'conectado': False})
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -179,6 +206,12 @@ def handle_mensaje(data):
         emit('error', {'mensaje': 'No conectado al servidor de chat'})
         return
     
+    # No permitir enviar mensajes en modo servidor
+    cliente = clientes_web[session_id]
+    if cliente.get('modo_servidor', False):
+        emit('error', {'mensaje': 'El modo servidor es solo lectura'})
+        return
+    
     mensaje = data.get('mensaje', '').strip()
     if not mensaje:
         return
@@ -192,15 +225,28 @@ def handle_mensaje(data):
         }
         
         # Enviar al servidor de chat
-        cliente = clientes_web[session_id]
         cliente['file_writer'].write(json.dumps(paquete) + "\n")
         cliente['file_writer'].flush()
         
-        # Confirmar al frontend
+        # Confirmar al frontend con timestamp
+        timestamp = datetime.now().strftime("%H:%M:%S")
         emit('mensaje_enviado', {
             'mensaje': mensaje,
-            'etiqueta': cliente['etiqueta']
+            'etiqueta': cliente['etiqueta'],
+            'cliente_id': cliente['cid'],
+            'timestamp': timestamp
         })
+        
+        # Emitir confirmación de envío exitoso
+        emit('mensaje_confirmado', {
+            'mensaje': mensaje,
+            'timestamp': timestamp
+        })
+        
+        # NOTA: No enviamos manualmente el mensaje al modo servidor aquí
+        # porque el servidor de chat ya hace broadcast a todos los clientes
+        # (incluyendo las sesiones en modo servidor), y lo recibirán a través
+        # de recibir_mensajes_chat() para evitar duplicación
         
     except Exception as e:
         emit('error', {'mensaje': f"Error al enviar: {str(e)}"})

@@ -126,6 +126,41 @@ body {
     margin-top: 5px;
 }
 
+.mensaje-contenido {
+    font-size: 15px;
+    line-height: 1.4;
+    margin-bottom: 4px;
+}
+
+.confirmacion-envio {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    margin-top: 4px;
+    opacity: 0.8;
+    color: rgba(255, 255, 255, 0.7);
+    transition: all 0.3s ease;
+}
+
+.confirmacion-envio.confirmado {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.estado-envio {
+    font-size: 12px;
+    display: inline-block;
+}
+
+.texto-confirmacion {
+    font-style: italic;
+}
+
+.confirmacion-envio.confirmado .estado-envio {
+    color: #4CAF50;
+    font-weight: bold;
+}
+
 .input-area {
     padding: 20px;
     background: rgb(68, 68, 68);
