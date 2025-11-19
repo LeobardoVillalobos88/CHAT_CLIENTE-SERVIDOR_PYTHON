@@ -5,7 +5,11 @@ import hmac
 import hashlib
 import json
 import os
+import base64
+import time
+
 from dotenv import load_dotenv
+from FirmaDigital.firma_digital import firmar_pdf, firmar_archivo_generico, sha256_bytes, generar_llaves
 
 # CARGA DE VARIABLES DE ENTORNO
 load_dotenv()
@@ -20,22 +24,29 @@ KEY_FILE = "key.pem"
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain(certfile=CERT_FILE, keyfile=KEY_FILE)
 
+# CARPETAS PARA ARCHIVOS
+CARPETA_RECIBIDOS = "archivos_recibidos"
+os.makedirs(CARPETA_RECIBIDOS, exist_ok=True)
+
 # VARIABLES GLOBALES
 lock = threading.Lock()
 clientes = {}  # {conn: {"id": cid, "addr": addr, "writer": file_writer}}
 siguiente_id = 1
+
 
 # FUNCIONES AUXILIARES
 def verificar_hmac(msg: str, firma_hex: str) -> bool:
     mac = hmac.new(SECRET_KEY, msg.encode('utf-8'), hashlib.sha256).hexdigest()
     return hmac.compare_digest(mac, firma_hex)
 
+
 def sha256_hex(texto: str) -> str:
     return hashlib.sha256(texto.encode('utf-8')).hexdigest()
 
-# FUNCIÓN PARA REENVIAR MENSAJES A TODOS LOS CLIENTES
+
+# BROADCAST DE MENSAJES DE CHAT
 def broadcast_mensaje(mensaje_enviado: dict, cliente_origen_id: int):
-    """Reenvía un mensaje validado a todos los clientes conectados"""
+    """Reenvía un mensaje validado a todos los clientes conectados (solo chat)."""
     mensaje_broadcast = {
         "type": "mensaje",
         "cliente_id": cliente_origen_id,
@@ -43,7 +54,7 @@ def broadcast_mensaje(mensaje_enviado: dict, cliente_origen_id: int):
         "timestamp": mensaje_enviado.get("timestamp", "")
     }
     mensaje_json = json.dumps(mensaje_broadcast) + "\n"
-    
+
     with lock:
         clientes_a_eliminar = []
         for conn, datos in clientes.items():
@@ -53,8 +64,7 @@ def broadcast_mensaje(mensaje_enviado: dict, cliente_origen_id: int):
                     datos["writer"].flush()
                 except Exception:
                     clientes_a_eliminar.append(conn)
-        
-        # Eliminar clientes desconectados
+
         for conn in clientes_a_eliminar:
             if conn in clientes:
                 try:
@@ -64,20 +74,77 @@ def broadcast_mensaje(mensaje_enviado: dict, cliente_origen_id: int):
                     pass
                 clientes.pop(conn, None)
 
+
+# MANEJO DE ARCHIVOS RECIBIDOS
+def manejar_archivo(paquete: dict, cid: int):
+    """
+    Maneja un paquete de tipo 'archivo':
+    - Verifica integridad por SHA-256.
+    - Guarda el archivo en el servidor.
+    - Si es PDF, lo firma y genera _firmado.pdf con hoja de firma.
+    - Si es otro tipo, genera sólo .sig.
+    """
+    nombre = paquete.get("nombre")
+    data_b64 = paquete.get("data")
+    sha_remoto = paquete.get("sha", "").lower()
+
+    if not nombre or not data_b64 or not sha_remoto:
+        print(f"[ARCHIVO] Cliente #{cid}: paquete incompleto para archivo.")
+        return
+
+    try:
+        data = base64.b64decode(data_b64)
+    except Exception as e:
+        print(f"[ARCHIVO] Cliente #{cid}: error al decodificar base64: {e}")
+        return
+
+    sha_local = sha256_bytes(data)
+    if not hmac.compare_digest(sha_local.lower(), sha_remoto):
+        print(f"[ARCHIVO] Cliente #{cid}: SHA no coincide. Archivo rechazado.")
+        return
+
+    # Guardar archivo recibido
+    ruta_guardado = os.path.join(CARPETA_RECIBIDOS, f"cliente{cid}_{nombre}")
+    try:
+        with open(ruta_guardado, "wb") as f:
+            f.write(data)
+    except Exception as e:
+        print(f"[ARCHIVO] Cliente #{cid}: error al guardar archivo: {e}")
+        return
+
+    print(f"[ARCHIVO] Cliente #{cid}: archivo guardado en {ruta_guardado}")
+    generar_llaves()  # Asegurar que existan llaves de firma
+
+    # Firmar según tipo
+    if nombre.lower().endswith(".pdf"):
+        try:
+            ruta_pdf_firmado, ruta_sig, info = firmar_pdf(ruta_guardado, cliente_id=cid)
+            print(f"[ARCHIVO] Cliente #{cid}: PDF firmado -> {ruta_pdf_firmado}")
+            print(f"[ARCHIVO] Firma (.sig) -> {ruta_sig}")
+        except Exception as e:
+            print(f"[ARCHIVO] Cliente #{cid}: error al firmar PDF: {e}")
+    else:
+        try:
+            ruta_sig, info = firmar_archivo_generico(ruta_guardado, cliente_id=cid)
+            print(f"[ARCHIVO] Cliente #{cid}: archivo firmado (no PDF) -> {ruta_sig}")
+        except Exception as e:
+            print(f"[ARCHIVO] Cliente #{cid}: error al firmar archivo: {e}")
+
+
 # MANEJO DE CLIENTES
 def manejar_cliente(conn: ssl.SSLSocket, addr):
     global siguiente_id
     with lock:
         cid = siguiente_id
         siguiente_id += 1
-    
+
     print(f"[CONEXIÓN] Cliente #{cid} desde {addr} (SSL Activo)")
 
     try:
         conn.sendall(f"ID:{cid}\n".encode('utf-8'))
         file_writer = conn.makefile('w', encoding='utf-8', newline='\n')
         file_reader = conn.makefile('r', encoding='utf-8', newline='\n')
-        
+
         with lock:
             clientes[conn] = {"id": cid, "addr": addr, "writer": file_writer}
     except Exception:
@@ -86,22 +153,31 @@ def manejar_cliente(conn: ssl.SSLSocket, addr):
         return
 
     try:
-        import time
         for linea in file_reader:
             linea = linea.strip()
             if not linea:
                 continue
+
             try:
                 paquete = json.loads(linea)
-                msg   = paquete.get("msg", "")
-                firma = paquete.get("hmac", "")
-                sha   = paquete.get("sha", "")
             except json.JSONDecodeError:
                 print(f"[!] Cliente #{cid}: JSON inválido.")
                 continue
 
+            tipo = paquete.get("type", "chat")
+
+            # --- MANEJO DE ARCHIVOS ---
+            if tipo == "archivo":
+                manejar_archivo(paquete, cid)
+                continue
+
+            # --- MANEJO DE MENSAJES DE CHAT (lo de siempre) ---
+            msg = paquete.get("msg", "")
+            firma = paquete.get("hmac", "")
+            sha = paquete.get("sha", "")
+
             if not msg or not sha:
-                print(f"[!] Cliente #{cid}: paquete incompleto.")
+                print(f"[!] Cliente #{cid}: paquete incompleto para chat.")
                 continue
 
             # Verificaciones de seguridad
@@ -110,12 +186,10 @@ def manejar_cliente(conn: ssl.SSLSocket, addr):
 
             if sha_ok and hmac_ok:
                 print(f"[OK] Cliente #{cid}: {msg}  (SHA OK, HMAC OK)")
-                # Reenviar mensaje a todos los demás clientes
                 paquete["timestamp"] = time.strftime("%H:%M:%S")
                 broadcast_mensaje(paquete, cid)
             elif sha_ok:
                 print(f"[OK] Cliente #{cid}: {msg}  (SHA OK, HMAC NO)")
-                # Aún así reenviar si SHA es válido
                 paquete["timestamp"] = time.strftime("%H:%M:%S")
                 broadcast_mensaje(paquete, cid)
             else:
@@ -132,7 +206,8 @@ def manejar_cliente(conn: ssl.SSLSocket, addr):
         with lock:
             clientes.pop(conn, None)
         print(f"[DESCONECTADO] Cliente #{cid} ({addr})")
-        
+
+
 # SERVIDOR PRINCIPAL
 def main():
     bindsocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -152,6 +227,7 @@ def main():
         print("\nCerrando servidor…")
     finally:
         bindsocket.close()
+
 
 if __name__ == "__main__":
     main()

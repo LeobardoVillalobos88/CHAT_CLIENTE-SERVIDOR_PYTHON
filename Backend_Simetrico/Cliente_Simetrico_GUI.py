@@ -4,9 +4,10 @@ import hmac
 import hashlib
 import json
 import os
+import base64
 import threading
 import tkinter as tk
-from tkinter import scrolledtext, messagebox
+from tkinter import scrolledtext, messagebox, filedialog
 from dotenv import load_dotenv
 
 # CARGA DE VARIABLES DE ENTORNO
@@ -26,6 +27,9 @@ def firmar(msg: str) -> str:
 
 def sha256_hex(texto: str) -> str:
     return hashlib.sha256(texto.encode('utf-8')).hexdigest()
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 def recibir_id(sock: ssl.SSLSocket) -> int:
     buffer = b""
@@ -47,7 +51,7 @@ class ClienteChatGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Chat Seguro - Cliente")
-        self.root.geometry("600x500")
+        self.root.geometry("650x520")
         self.root.resizable(True, True)
         
         # Variables
@@ -128,17 +132,30 @@ class ClienteChatGUI:
             padx=20
         )
         self.btn_enviar.pack(side=tk.RIGHT)
-        
-        # Botón conectar/desconectar
+
+        # Frame de botones extra (archivo / conectar)
+        botones_frame = tk.Frame(main_frame)
+        botones_frame.pack(fill=tk.X, pady=(5, 0))
+
+        self.btn_archivo = tk.Button(
+            botones_frame,
+            text="Enviar archivo para firma",
+            command=self.enviar_archivo,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 9)
+        )
+        self.btn_archivo.pack(side=tk.LEFT)
+
         self.btn_conectar = tk.Button(
-            main_frame,
+            botones_frame,
             text="Desconectar",
             command=self.desconectar,
             bg="#f44336",
             fg="white",
             font=("Arial", 9)
         )
-        self.btn_conectar.pack(pady=(5, 0))
+        self.btn_conectar.pack(side=tk.RIGHT)
     
     def agregar_mensaje(self, mensaje, tipo="info"):
         """Agrega un mensaje al área de texto"""
@@ -146,6 +163,8 @@ class ClienteChatGUI:
         
         if tipo == "enviado":
             self.text_area.insert(tk.END, f"[ENVIADO] {mensaje}\n", "enviado")
+        elif tipo == "recibido":
+            self.text_area.insert(tk.END, f"[RECIBIDO] {mensaje}\n", "recibido")
         elif tipo == "error":
             self.text_area.insert(tk.END, f"[ERROR] {mensaje}\n", "error")
         elif tipo == "sistema":
@@ -183,9 +202,10 @@ class ClienteChatGUI:
             # Actualizar interfaz
             self.label_estado.config(text="Conectado (SSL/TLS)", fg="green")
             self.label_id.config(text=f"ID: {self.cid}")
-            self.btn_conectar.config(text="Desconectar", bg="#f44336")
+            self.btn_conectar.config(text="Desconectar", bg="#f44336", command=self.desconectar)
             self.entry_mensaje.config(state=tk.NORMAL)
             self.btn_enviar.config(state=tk.NORMAL)
+            self.btn_archivo.config(state=tk.NORMAL)
             
             self.agregar_mensaje("Conexión segura establecida (SSL/TLS activo)", "sistema")
             self.agregar_mensaje(f"Conectado como: {self.etiqueta}", "sistema")
@@ -193,6 +213,7 @@ class ClienteChatGUI:
         except Exception as e:
             self.conectado = False
             self.label_estado.config(text="Error de conexión", fg="red")
+            self.btn_archivo.config(state=tk.DISABLED)
             messagebox.showerror("Error", f"No se pudo conectar al servidor:\n{str(e)}")
             self.agregar_mensaje(f"Error de conexión: {str(e)}", "error")
     
@@ -212,11 +233,15 @@ class ClienteChatGUI:
                         mensaje = paquete.get("mensaje", "")
                         timestamp = paquete.get("timestamp", "")
                         
-                        if cliente_id != self.cid:  # No mostrar nuestros propios mensajes (ya los mostramos al enviar)
+                        if cliente_id != self.cid:
                             etiqueta_remitente = f"Cliente {cliente_id}"
                             hora = f"[{timestamp}]" if timestamp else ""
-                            self.root.after(0, self.agregar_mensaje, 
-                                           f"{hora} {etiqueta_remitente}: {mensaje}", "recibido")
+                            self.root.after(
+                                0,
+                                self.agregar_mensaje,
+                                f"{hora} {etiqueta_remitente}: {mensaje}",
+                                "recibido"
+                            )
                 except json.JSONDecodeError:
                     continue
         except Exception as e:
@@ -243,11 +268,12 @@ class ClienteChatGUI:
         self.btn_conectar.config(text="Conectar", bg="#4CAF50", command=self.conectar)
         self.entry_mensaje.config(state=tk.DISABLED)
         self.btn_enviar.config(state=tk.DISABLED)
+        self.btn_archivo.config(state=tk.DISABLED)
         
         self.agregar_mensaje("Conexión cerrada", "sistema")
     
     def enviar_mensaje(self):
-        """Envía un mensaje al servidor"""
+        """Envía un mensaje de chat al servidor"""
         if not self.conectado:
             messagebox.showwarning("Advertencia", "No estás conectado al servidor")
             return
@@ -272,6 +298,56 @@ class ClienteChatGUI:
         except Exception as e:
             self.agregar_mensaje(f"Error al enviar: {str(e)}", "error")
             messagebox.showerror("Error", f"Error al enviar mensaje:\n{str(e)}")
+            self.desconectar()
+
+    def enviar_archivo(self):
+        """Selecciona y envía un archivo al servidor para firma digital."""
+        if not self.conectado:
+            messagebox.showwarning("Advertencia", "No estás conectado al servidor")
+            return
+
+        ruta = filedialog.askopenfilename(
+            title="Selecciona un archivo para firmar",
+            filetypes=(
+                ("Todos los archivos", "*.*"),
+                ("PDF", "*.pdf"),
+                ("Texto", "*.txt"),
+                ("ZIP", "*.zip"),
+            )
+        )
+        if not ruta:
+            return  # usuario canceló
+
+        try:
+            with open(ruta, "rb") as f:
+                data = f.read()
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo leer el archivo:\n{e}")
+            self.agregar_mensaje(f"No se pudo leer el archivo: {e}", "error")
+            return
+
+        nombre = os.path.basename(ruta)
+        sha_archivo = sha256_bytes(data)
+        data_b64 = base64.b64encode(data).decode("utf-8")
+
+        paquete = {
+            "type": "archivo",
+            "nombre": nombre,
+            "data": data_b64,
+            "sha": sha_archivo
+        }
+
+        try:
+            self.file_writer.write(json.dumps(paquete) + "\n")
+            self.file_writer.flush()
+            tamaño_kb = len(data) / 1024
+            self.agregar_mensaje(
+                f"Documento enviado para firma: {nombre} ({tamaño_kb:.1f} KB)",
+                "sistema"
+            )
+        except Exception as e:
+            self.agregar_mensaje(f"Error al enviar archivo: {e}", "error")
+            messagebox.showerror("Error", f"Error al enviar archivo:\n{e}")
             self.desconectar()
     
     def cerrar(self):
