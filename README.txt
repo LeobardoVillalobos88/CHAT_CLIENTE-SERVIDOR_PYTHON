@@ -10,8 +10,8 @@ Nieto Ramírez Caleb Isai
 Paredes Domínguez Jassiel
 
 Materia: Seguridad Informática  
-Fecha: 02/11/2025  
-Versión actual: 0.5
+Fecha: 19/11/2025  
+Versión actual: 0.6
 
 --------------------------------------------------------
 DESCRIPCIÓN GENERAL
@@ -34,7 +34,7 @@ segura para los objetivos del proyecto.
 REQUISITOS
 --------------------------------------------------------
 - Python 3.8 o superior
-- Librerías estándar (no requiere instalación externa):
+- Librerías estándar utilizadas por la versión simétrica:
   * socket
   * threading
   * json
@@ -44,6 +44,12 @@ REQUISITOS
   * dotenv (para leer variables de entorno)
   * cryptography (para generar certificados locales)
   * time, uuid (utilizadas en versiones anteriores)
+- Dependencias adicionales para el frontend web (instalar con
+  `pip install -r WebFrontend/requirements.txt`):
+  * Flask
+  * Flask-SocketIO
+  * python-dotenv
+  * eventlet / simple-websocket (según el adaptador seleccionado)
 
 --------------------------------------------------------
 VERSIONES Y CAMBIOS
@@ -151,6 +157,37 @@ Servidor → 4b3eb687a8279e547f159e407498b35a
 Cliente  → 5a563c59cc29e0e75f4ceb546fb5d087
 
 --------------------------------------------------------
+
+Versión 0.6 - (19/11/2025)
+--------------------------
+Se agrega un frontend web en tiempo real que funciona como puente entre los
+clientes y el servidor simétrico.
+
+CAMBIOS PRINCIPALES:
+- Se creó el módulo `WebFrontend/` basado en Flask + Flask-SocketIO.
+- Nueva interfaz cliente (`/`) que permite enviar mensajes web y solo ver el
+  historial propio con confirmaciones de envío estilo WhatsApp.
+- Nueva interfaz servidor (`/servidor`) en modo solo lectura para visualizar
+  todos los mensajes recibidos desde cualquier cliente conectado.
+- El backend web mantiene conexiones seguras TLS contra `Servidor_Simetrico.py`
+  reutilizando las mismas claves y variables de entorno.
+- Se reorganizó la lógica de confirmaciones y filtrado para evitar que los
+  clientes web vean mensajes de otros usuarios.
+
+REQUISITOS ADICIONALES:
+- Instalar las dependencias listadas en `WebFrontend/requirements.txt`
+  (Flask, Flask-SocketIO, python-dotenv, etc.).
+- Ejecutar `python generar_certificado.py` (si aún no existen cert.pem/key.pem).
+- Definir `.env` en la raíz con `HOST`, `PORT` y `SECRET_KEY`.
+
+Archivos nuevos/destacados:
+- `WebFrontend/app.py`
+- `WebFrontend/templates/index.html`
+- `WebFrontend/templates/servidor.html`
+- `WebFrontend/static/css/style.css`
+- `WebFrontend/static/css/servidor.css`
+
+--------------------------------------------------------
 GENERACIÓN DEL CERTIFICADO (MÉTODO ALTERNATIVO)
 --------------------------------------------------------
 Si el comando `openssl` no está disponible en el sistema, es posible
@@ -210,16 +247,32 @@ CIFRADO / HASH UTILIZADO
 --------------------------------------------------------
 CÓMO EJECUTAR
 --------------------------------------------------------
-1. Ejecutar primero el servidor:
+1. Preparar el entorno (solo primera vez):
+   - Crear el archivo `.env` en la raíz con `HOST`, `PORT`, `SECRET_KEY`.
+   - Generar certificados ejecutando `python generar_certificado.py`.
+
+2. Iniciar el servidor principal (terminal 1):
+   >>> cd Simetrico
    >>> python Servidor_Simetrico.py
+   Deja esta terminal abierta; escucharás en `HOST:PORT` con SSL/TLS.
 
-2. Ejecutar el cliente:
-   >>> python Cliente_Simetrico.py
+3. Iniciar el frontend web (terminal 2):
+   >>> cd WebFrontend
+   >>> pip install -r requirements.txt   # solo primera vez
+   >>> python app.py
+   El puente web quedará disponible en `http://localhost:8080`.
 
-3. Escribir mensajes y presionar ENTER para enviarlos.
-   El servidor mostrará si el SHA y/o el HMAC son válidos.
+4. Usar la aplicación desde el navegador:
+   - Cliente web: `http://localhost:8080`
+     * Envía mensajes, visualiza únicamente tu historial y recibe
+       confirmaciones “Mensaje enviado correctamente”.
+   - Vista del servidor: `http://localhost:8080/servidor`
+     * Monitor de solo lectura que lista todos los mensajes recibidos
+       por el servidor desde cualquier cliente conectado.
 
-4. Verificar que la conexión se establezca en modo seguro (SSL/TLS).
+5. (Opcional) Los clientes CLI/GUI (`Cliente_Simetrico.py`,
+   `Cliente_Simetrico_GUI.py`) siguen funcionando y pueden coexistir
+   con el frontend web si se requiere.
 
 --------------------------------------------------------
 FIN DEL DOCUMENTO
