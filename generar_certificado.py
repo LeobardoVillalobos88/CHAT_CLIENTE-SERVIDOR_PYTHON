@@ -3,6 +3,26 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
 from datetime import datetime, timedelta
+import os
+
+# Directorio donde se guardarán los certificados (carpeta Simetrico)
+CERT_DIR = "Simetrico"
+CERT_FILE = os.path.join(CERT_DIR, "cert.pem")
+KEY_FILE = os.path.join(CERT_DIR, "key.pem")
+
+# Crear directorio si no existe
+if not os.path.exists(CERT_DIR):
+    os.makedirs(CERT_DIR)
+    print(f"📁 Directorio '{CERT_DIR}' creado")
+
+# Verificar si ya existen los certificados
+if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
+    respuesta = input(f"⚠️  Los certificados ya existen en {CERT_DIR}/. ¿Deseas regenerarlos? (s/n): ")
+    if respuesta.lower() != 's':
+        print("❌ Operación cancelada. Se mantienen los certificados existentes.")
+        exit(0)
+
+print("🔐 Generando certificados SSL/TLS...")
 
 # Generar clave privada
 key = rsa.generate_private_key(
@@ -11,7 +31,7 @@ key = rsa.generate_private_key(
 )
 
 # Guardar la clave privada
-with open("key.pem", "wb") as f:
+with open(KEY_FILE, "wb") as f:
     f.write(key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.TraditionalOpenSSL,
@@ -43,7 +63,11 @@ cert = (
 )
 
 # Guardar el certificado
-with open("cert.pem", "wb") as f:
+with open(CERT_FILE, "wb") as f:
     f.write(cert.public_bytes(serialization.Encoding.PEM))
 
-print("✅ Certificado y clave generados: cert.pem / key.pem")
+print(f"✅ Certificado y clave generados exitosamente:")
+print(f"   📄 {CERT_FILE}")
+print(f"   🔑 {KEY_FILE}")
+print(f"\n💡 Estos certificados son válidos por 365 días.")
+print(f"💡 Ahora puedes ejecutar el servidor desde la carpeta '{CERT_DIR}/'")

@@ -1,0 +1,163 @@
+================================================================================
+INSTRUCCIONES PARA USAR EL FRONTEND WEB - CHAT SEGURO
+================================================================================
+
+REQUISITOS PREVIOS:
+-------------------
+1. Python 3.8 o superior instalado
+2. Certificados SSL generados (cert.pem y key.pem en carpeta Simetrico/)
+3. Archivo .env configurado en la raiz del proyecto
+4. Servidor de chat corriendo (Servidor_Simetrico.py)
+
+================================================================================
+PASO 1: GENERAR CERTIFICADOS SSL (Solo primera vez)
+================================================================================
+
+Abre una terminal en la raiz del proyecto y ejecuta:
+
+    python generar_certificado.py
+
+Esto creara los archivos cert.pem y key.pem en la carpeta Simetrico/
+
+================================================================================
+PASO 2: INSTALAR DEPENDENCIAS DEL FRONTEND WEB (Solo primera vez)
+================================================================================
+
+Abre una terminal y ejecuta:
+
+    cd WebFrontend
+    python -m pip install -r requirements.txt
+
+Esto instalara Flask, flask-socketio y otras dependencias necesarias.
+
+================================================================================
+PASO 3: INICIAR EL SERVIDOR DE CHAT
+================================================================================
+
+Abre una terminal y ejecuta:
+
+    cd Simetrico
+    python Servidor_Simetrico.py
+
+Deberias ver el mensaje:
+    "Servidor escuchando en 127.0.0.1:5000 (modo seguro SSL/TLS)"
+
+DEJA ESTA TERMINAL ABIERTA - El servidor debe seguir corriendo.
+
+================================================================================
+PASO 4: INICIAR EL SERVIDOR WEB
+================================================================================
+
+Abre OTRA terminal nueva y ejecuta:
+
+    cd WebFrontend
+    python app.py
+
+Deberias ver:
+    ==================================================
+    Servidor Web iniciado
+    Frontend disponible en: http://localhost:8080
+    Conectando al servidor de chat en: 127.0.0.1:5000
+    ==================================================
+
+DEJA ESTA TERMINAL ABIERTA - El servidor web debe seguir corriendo.
+
+================================================================================
+PASO 5: ABRIR EN EL NAVEGADOR
+================================================================================
+
+Abre tu navegador web (Chrome, Firefox, Edge, etc.) y ve a:
+
+    http://localhost:8080
+
+Veras la interfaz del chat seguro.
+
+================================================================================
+COMO USAR EL CHAT
+================================================================================
+
+1. Al abrir la pagina, el sistema se conectara automaticamente al servidor
+2. Veras un indicador de estado en la parte superior:
+   - Verde = Conectado
+   - Rojo = Desconectado
+3. Escribe tu mensaje en el campo de texto
+4. Presiona Enter o haz clic en el boton "Enviar"
+5. Tus mensajes apareceran a la derecha (azul)
+6. Los mensajes de otros clientes apareceran a la izquierda (morado)
+7. Los mensajes del sistema apareceran en el centro (gris)
+
+================================================================================
+PROBAR CON MULTIPLES CLIENTES
+================================================================================
+
+Para probar que el chat funciona con varios usuarios:
+
+1. Abre varias pestañas del navegador en http://localhost:8080
+2. O abre el navegador en diferentes dispositivos (si estan en la misma red)
+3. Cada cliente tendra un ID diferente (Cliente 1, Cliente 2, etc.)
+4. Los mensajes se enviaran a todos los clientes conectados
+
+================================================================================
+SOLUCION DE PROBLEMAS
+================================================================================
+
+ERROR: "cert.pem no encontrado"
+--------------------------------
+Solucion: Ejecuta python generar_certificado.py desde la raiz del proyecto
+
+ERROR: "No se pudo conectar al servidor"
+-----------------------------------------
+Solucion: 
+- Verifica que el servidor de chat este corriendo (Paso 3)
+- Verifica que el puerto en .env sea 5000
+- Verifica que los certificados esten en Simetrico/
+
+ERROR: "ModuleNotFoundError: No module named 'flask'"
+----------------------------------------------------
+Solucion: Ejecuta el Paso 2 para instalar las dependencias
+
+ERROR: "Address already in use" (puerto 8080 ocupado)
+-----------------------------------------------------
+Solucion: 
+- Cierra otros programas que usen el puerto 8080
+- O cambia el puerto en app.py (linea final: port=8080)
+
+ERROR: El navegador no carga la pagina
+---------------------------------------
+Solucion:
+- Verifica que el servidor web este corriendo (Paso 4)
+- Asegurate de usar http://localhost:8080 (NO https://)
+- Prueba con otro navegador
+
+ERROR: Los mensajes no se reciben entre clientes
+-------------------------------------------------
+Solucion:
+- Verifica que el servidor de chat este corriendo
+- Verifica que ambos clientes muestren "Conectado" (indicador verde)
+- Revisa la consola del servidor para ver si hay errores
+
+================================================================================
+ARCHIVOS IMPORTANTES
+================================================================================
+
+- WebFrontend/app.py              -> Servidor web intermedio
+- WebFrontend/templates/index.html -> Interfaz del chat
+- WebFrontend/static/css/style.css -> Estilos CSS
+- WebFrontend/requirements.txt     -> Dependencias Python
+- Simetrico/Servidor_Simetrico.py  -> Servidor de chat principal
+
+================================================================================
+NOTAS IMPORTANTES
+================================================================================
+
+- El servidor de chat (Paso 3) y el servidor web (Paso 4) deben estar
+  corriendo simultaneamente
+- Puedes tener multiples clientes conectados al mismo tiempo
+- Todos los mensajes estan cifrados con SSL/TLS
+- La comunicacion es segura: HMAC-SHA256 y SHA-256
+- Para detener los servidores, presiona Ctrl+C en las terminales
+
+================================================================================
+FIN DE LAS INSTRUCCIONES
+================================================================================
+
