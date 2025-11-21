@@ -2,7 +2,7 @@
 Servidor web intermedio para el chat seguro
 Actúa como puente entre el frontend web y el servidor de chat existente
 """
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from flask_socketio import SocketIO, emit, disconnect
 import socket
 import ssl
@@ -11,8 +11,24 @@ import hashlib
 import json
 import os
 import threading
+import base64
+import tempfile
 from datetime import datetime
 from dotenv import load_dotenv
+
+# Importar funciones de firma digital
+import sys
+# Obtener la ruta del directorio del proyecto (raíz)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BACKEND_DIR = os.path.join(BASE_DIR, 'Backend_Simetrico')
+sys.path.insert(0, BACKEND_DIR)
+from FirmaDigital.firma_digital import (
+    firmar_pdf, 
+    firmar_archivo_generico, 
+    sha256_bytes, 
+    generar_llaves,
+    verificar_firma_bytes
+)
 
 # CARGA DE VARIABLES DE ENTORNO
 load_dotenv()
@@ -165,6 +181,136 @@ def index():
 @app.route('/servidor')
 def servidor():
     return render_template('servidor.html')
+
+# RUTA PARA FIRMA DIGITAL
+@app.route('/firmar_archivo', methods=['POST'])
+def firmar_archivo():
+    """Recibe un archivo del frontend, lo firma y devuelve los resultados"""
+    try:
+        if 'archivo' not in request.files:
+            return jsonify({'error': 'No se proporcionó ningún archivo'}), 400
+        
+        archivo = request.files['archivo']
+        if archivo.filename == '':
+            return jsonify({'error': 'No se seleccionó ningún archivo'}), 400
+        
+        # Leer el archivo
+        contenido = archivo.read()
+        nombre_original = archivo.filename
+        
+        # Guardar temporalmente para firmar
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(nombre_original)[1]) as temp_file:
+            temp_file.write(contenido)
+            temp_path = temp_file.name
+        
+        try:
+            # Asegurar que existan las llaves
+            generar_llaves()
+            
+            # Firmar según el tipo
+            es_pdf = nombre_original.lower().endswith('.pdf')
+            
+            if es_pdf:
+                ruta_pdf_firmado, ruta_sig, info = firmar_pdf(temp_path, cliente_id=None)
+                
+                # Leer archivos firmados
+                with open(ruta_pdf_firmado, 'rb') as f:
+                    pdf_firmado_data = f.read()
+                
+                with open(ruta_sig, 'rb') as f:
+                    firma_data = f.read()
+                
+                # Limpiar archivos temporales del servidor
+                try:
+                    os.remove(ruta_pdf_firmado)
+                    os.remove(ruta_sig)
+                except:
+                    pass
+                
+                return jsonify({
+                    'exito': True,
+                    'nombre_original': nombre_original,
+                    'archivo_firmado': base64.b64encode(pdf_firmado_data).decode('utf-8'),
+                    'firma': base64.b64encode(firma_data).decode('utf-8'),
+                    'hash': info.get('hash', ''),
+                    'tipo': 'pdf',
+                    'nombre_firmado': f'firmado_{nombre_original}',
+                    'nombre_firma': f'{nombre_original}.sig'
+                })
+            else:
+                ruta_sig, info = firmar_archivo_generico(temp_path, cliente_id=None)
+                
+                # Leer firma
+                with open(ruta_sig, 'rb') as f:
+                    firma_data = f.read()
+                
+                # Limpiar archivo temporal
+                try:
+                    os.remove(ruta_sig)
+                except:
+                    pass
+                
+                return jsonify({
+                    'exito': True,
+                    'nombre_original': nombre_original,
+                    'archivo_original': base64.b64encode(contenido).decode('utf-8'),
+                    'firma': base64.b64encode(firma_data).decode('utf-8'),
+                    'hash': info.get('hash', ''),
+                    'tipo': 'generico',
+                    'nombre_firma': f'{nombre_original}.sig'
+                })
+        finally:
+            # Limpiar archivo temporal
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+                
+    except Exception as e:
+        return jsonify({'error': f'Error al firmar archivo: {str(e)}'}), 500
+
+# RUTA PARA VERIFICAR FIRMA DIGITAL
+@app.route('/verificar_firma', methods=['POST'])
+def verificar_firma():
+    """Recibe un archivo y su firma, y verifica que la firma sea válida"""
+    try:
+        if 'archivo' not in request.files or 'firma' not in request.files:
+            return jsonify({'error': 'Debes proporcionar tanto el archivo como la firma (.sig)'}), 400
+        
+        archivo = request.files['archivo']
+        firma_file = request.files['firma']
+        
+        if archivo.filename == '' or firma_file.filename == '':
+            return jsonify({'error': 'Debes seleccionar ambos archivos'}), 400
+        
+        # Leer el archivo y la firma
+        contenido_archivo = archivo.read()
+        contenido_firma = firma_file.read()
+        
+        # Decodificar la firma (está en base64)
+        try:
+            firma_bytes = base64.b64decode(contenido_firma)
+        except Exception:
+            return jsonify({'error': 'El archivo de firma no está en formato base64 válido'}), 400
+        
+        # Calcular hash del archivo
+        hash_archivo = sha256_bytes(contenido_archivo)
+        
+        # Verificar la firma
+        firma_valida = verificar_firma_bytes(contenido_archivo, firma_bytes)
+        
+        return jsonify({
+            'exito': True,
+            'firma_valida': firma_valida,
+            'hash': hash_archivo,
+            'mensaje': '✅ FIRMA DIGITAL VÁLIDA - El archivo NO ha sido modificado' if firma_valida 
+                      else '❌ FIRMA NO VÁLIDA - El archivo fue modificado o la firma corresponde a otro archivo',
+            'nombre_archivo': archivo.filename,
+            'nombre_firma': firma_file.filename
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Error al verificar firma: {str(e)}'}), 500
 
 # WEBSOCKET EVENTS
 @socketio.on('connect')
