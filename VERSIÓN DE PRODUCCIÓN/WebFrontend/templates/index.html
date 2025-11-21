@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Seguro - Web</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>KRIPTEN</h1>
+            <div class="estado">
+                <div class="estado-indicador" id="estadoIndicador"></div>
+                <span id="estadoTexto">Conectando...</span>
+            </div>
+        </div>
+
+        <div class="chat-area" id="chatArea"></div>
+
+        <div class="input-area">
+            <input 
+                type="text" 
+                id="mensajeInput" 
+                placeholder="Escribe tu mensaje aquí..." 
+                disabled
+            >
+            <button id="btnEnviar" disabled>Enviar</button>
+        </div>
+
+        <div class="firma-digital-area">
+            <div class="firma-header">
+                <h3>🔐 Firma Digital</h3>
+            </div>
+            
+            <div class="firma-seccion">
+                <h4 class="firma-subtitulo">Firmar Archivo</h4>
+                <div class="firma-controls">
+                    <input 
+                        type="file" 
+                        id="archivoInput" 
+                        style="display: none;"
+                        accept=".pdf,.txt,.zip,.doc,.docx"
+                    >
+                    <button id="btnSeleccionarArchivo" class="btn-firma">
+                        Seleccionar archivo para firmar
+                    </button>
+                    <button id="btnFirmarArchivo" class="btn-firma" disabled style="display: none;">
+                        Firmar archivo
+                    </button>
+                </div>
+                <div id="infoArchivo" class="info-archivo" style="display: none;"></div>
+                <div id="resultadoFirma" class="resultado-firma" style="display: none;"></div>
+            </div>
+
+            <div class="firma-seccion" style="margin-top: 20px; border-top: 1px solid #444; padding-top: 15px;">
+                <h4 class="firma-subtitulo">Verificar Firma</h4>
+                <div class="firma-controls">
+                    <input 
+                        type="file" 
+                        id="archivoVerificarInput" 
+                        style="display: none;"
+                        accept="*/*"
+                    >
+                    <input 
+                        type="file" 
+                        id="firmaVerificarInput" 
+                        style="display: none;"
+                        accept=".sig"
+                    >
+                    <button id="btnSeleccionarArchivoVerificar" class="btn-firma btn-verificar">
+                        Seleccionar archivo
+                    </button>
+                    <button id="btnSeleccionarFirmaVerificar" class="btn-firma btn-verificar">
+                        Seleccionar firma (.sig)
+                    </button>
+                    <button id="btnVerificarFirma" class="btn-firma btn-verificar" disabled>
+                        Verificar firma
+                    </button>
+                </div>
+                <div id="infoArchivoVerificar" class="info-archivo" style="display: none;"></div>
+                <div id="resultadoVerificacion" class="resultado-firma" style="display: none;"></div>
+            </div>
+        </div>
+
+        <div class="seguridad-info">
+            Comunicación cifrada con SSL/TLS | Verificación HMAC-SHA256 | Integridad SHA-256
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const chatArea = document.getElementById('chatArea');
+        const mensajeInput = document.getElementById('mensajeInput');
+        const btnEnviar = document.getElementById('btnEnviar');
+        const estadoIndicador = document.getElementById('estadoIndicador');
+        const estadoTexto = document.getElementById('estadoTexto');
+
+        let conectado = false;
+        let miEtiqueta = 'Cliente';
+        let miClienteId = null;
+        let mensajesPendientes = new Map();
+
+        function agregarMensaje(texto, tipo = 'enviado', timestamp = null, mensajeId = null) {
+            const mensajeDiv = document.createElement('div');
+            mensajeDiv.className = `mensaje ${tipo}`;
+            
+            if (tipo === 'sistema' || tipo === 'error') {
+                mensajeDiv.textContent = texto;
+            } else {
+                const hora = timestamp || new Date().toLocaleTimeString();
+                const confirmacionDiv = tipo === 'enviado' ? 
+                    `<div class="confirmacion-envio" id="confirmacion-${mensajeId || Date.now()}">
+                        <span class="estado-envio">⏳</span>
+                        <span class="texto-confirmacion">Enviando...</span>
+                    </div>` : '';
+                
+                mensajeDiv.innerHTML = `
+                    <div class="mensaje-contenido">${texto}</div>
+                    ${confirmacionDiv}
+                    <div class="mensaje-info">${hora}</div>
+                `;
+                
+                if (tipo === 'enviado' && mensajeId) {
+                    mensajesPendientes.set(mensajeId, mensajeDiv);
+                }
+            }
+            
+            chatArea.appendChild(mensajeDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            return mensajeDiv;
+        }
+
+        socket.on('connect', () => {
+            socket.emit('establecer_modo', { modo_servidor: false });
+        });
+
+        socket.on('conectado', (data) => {
+            conectado = true;
+            miEtiqueta = data.etiqueta;
+            miClienteId = data.id;
+            estadoIndicador.classList.add('activo');
+            estadoTexto.textContent = `Conectado como ${miEtiqueta}`;
+            mensajeInput.disabled = false;
+            btnEnviar.disabled = false;
+            mensajeInput.focus();
+        });
+
+        socket.on('estado', (data) => {
+            if (!data.conectado) {
+                conectado = false;
+                estadoIndicador.classList.remove('activo');
+                estadoTexto.textContent = 'Desconectado';
+                mensajeInput.disabled = true;
+                btnEnviar.disabled = true;
+            }
+        });
+
+        socket.on('mensaje_enviado', (data) => {
+            const mensajeId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            agregarMensaje(data.mensaje, 'enviado', data.timestamp, mensajeId);
+        });
+
+        socket.on('mensaje_recibido', (data) => {
+        });
+
+        socket.on('mensaje_confirmado', (data) => {
+            let mensajeEncontrado = null;
+            let mensajeIdEncontrado = null;
+            
+            for (const [id, div] of mensajesPendientes.entries()) {
+                const contenido = div.querySelector('.mensaje-contenido');
+                if (contenido && contenido.textContent.trim() === data.mensaje.trim()) {
+                    mensajeEncontrado = div;
+                    mensajeIdEncontrado = id;
+                    break;
+                }
+            }
+            
+            if (mensajeEncontrado) {
+                const confirmacionDiv = mensajeEncontrado.querySelector('.confirmacion-envio');
+                if (confirmacionDiv) {
+                    confirmacionDiv.innerHTML = `
+                        <span class="estado-envio">✓</span>
+                        <span class="texto-confirmacion">Mensaje enviado correctamente</span>
+                    `;
+                    confirmacionDiv.classList.add('confirmado');
+                }
+                mensajesPendientes.delete(mensajeIdEncontrado);
+            }
+        });
+
+        socket.on('error', (data) => {
+            agregarMensaje(data.mensaje, 'error');
+            conectado = false;
+            estadoIndicador.classList.remove('activo');
+            estadoTexto.textContent = 'Error de conexión';
+            mensajeInput.disabled = true;
+            btnEnviar.disabled = true;
+        });
+
+        socket.on('disconnect', () => {
+            conectado = false;
+            estadoIndicador.classList.remove('activo');
+            estadoTexto.textContent = 'Desconectado';
+            mensajeInput.disabled = true;
+            btnEnviar.disabled = true;
+            agregarMensaje('Desconectado del servidor', 'sistema');
+        });
+
+        function enviarMensaje() {
+            const mensaje = mensajeInput.value.trim();
+            if (!mensaje || !conectado) return;
+
+            socket.emit('enviar_mensaje', { mensaje: mensaje });
+            mensajeInput.value = '';
+        }
+
+        btnEnviar.addEventListener('click', enviarMensaje);
+        mensajeInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                enviarMensaje();
+            }
+        });
+
+        const archivoInput = document.getElementById('archivoInput');
+        const btnSeleccionarArchivo = document.getElementById('btnSeleccionarArchivo');
+        const btnFirmarArchivo = document.getElementById('btnFirmarArchivo');
+        const infoArchivo = document.getElementById('infoArchivo');
+        const resultadoFirma = document.getElementById('resultadoFirma');
+        let archivoSeleccionado = null;
+
+        btnSeleccionarArchivo.addEventListener('click', () => {
+            archivoInput.click();
+        });
+
+        archivoInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                archivoSeleccionado = file;
+                const tamañoMB = (file.size / (1024 * 1024)).toFixed(2);
+                infoArchivo.style.display = 'block';
+                infoArchivo.innerHTML = `
+                    <strong>Archivo seleccionado:</strong> ${file.name}<br>
+                    <strong>Tamaño:</strong> ${tamañoMB} MB<br>
+                    <strong>Tipo:</strong> ${file.type || 'Desconocido'}
+                `;
+                btnFirmarArchivo.style.display = 'inline-block';
+                btnFirmarArchivo.disabled = false;
+                resultadoFirma.style.display = 'none';
+            }
+        });
+
+        btnFirmarArchivo.addEventListener('click', async () => {
+            if (!archivoSeleccionado) {
+                alert('Por favor selecciona un archivo primero');
+                return;
+            }
+
+            btnFirmarArchivo.disabled = true;
+            btnFirmarArchivo.textContent = 'Firmando...';
+            resultadoFirma.style.display = 'block';
+            resultadoFirma.innerHTML = '<div class="procesando">⏳ Procesando firma digital...</div>';
+
+            try {
+                const formData = new FormData();
+                formData.append('archivo', archivoSeleccionado);
+
+                const response = await fetch('/firmar_archivo', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const resultado = await response.json();
+
+                if (resultado.exito) {
+                    let htmlResultado = `
+                        <div class="exito-firma">
+                            <h4>Archivo firmado correctamente</h4>
+                            <p><strong>Hash SHA-256:</strong> <code>${resultado.hash}</code></p>
+                    `;
+
+                    if (resultado.tipo === 'pdf') {
+                        htmlResultado += `
+                            <div class="descargas">
+                                <button class="btn-descargar" onclick="descargarArchivo('${resultado.archivo_firmado}', '${resultado.nombre_firmado}', 'application/pdf')">
+                                    Descargar PDF firmado
+                                </button>
+                                <button class="btn-descargar" onclick="descargarArchivo('${resultado.firma}', '${resultado.nombre_firma}', 'application/octet-stream')">
+                                    Descargar firma (.sig)
+                                </button>
+                            </div>
+                        `;
+                    } else {
+                        htmlResultado += `
+                            <div class="descargas">
+                                <button class="btn-descargar" onclick="descargarArchivo('${resultado.archivo_original}', '${resultado.nombre_original}', 'application/octet-stream')">
+                                    Descargar archivo original
+                                </button>
+                                <button class="btn-descargar" onclick="descargarArchivo('${resultado.firma}', '${resultado.nombre_firma}', 'application/octet-stream')">
+                                    Descargar firma (.sig)
+                                </button>
+                            </div>
+                        `;
+                    }
+
+                    htmlResultado += '</div>';
+                    resultadoFirma.innerHTML = htmlResultado;
+
+                    agregarMensaje(
+                        `Archivo "${archivoSeleccionado.name}" firmado digitalmente. Hash: ${resultado.hash.substring(0, 16)}...`,
+                        'sistema'
+                    );
+                } else {
+                    throw new Error(resultado.error || 'Error desconocido');
+                }
+            } catch (error) {
+                resultadoFirma.innerHTML = `
+                    <div class="error-firma">
+                        <h4>❌ Error al firmar archivo</h4>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                agregarMensaje(`Error al firmar archivo: ${error.message}`, 'error');
+            } finally {
+                btnFirmarArchivo.disabled = false;
+                btnFirmarArchivo.textContent = 'Firmar archivo';
+            }
+        });
+
+        window.descargarArchivo = function(base64Data, nombreArchivo, tipoMime) {
+            try {
+                const byteCharacters = atob(base64Data);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray], { type: tipoMime });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = nombreArchivo;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Error al descargar el archivo: ' + error.message);
+            }
+        };
+
+        const archivoVerificarInput = document.getElementById('archivoVerificarInput');
+        const firmaVerificarInput = document.getElementById('firmaVerificarInput');
+        const btnSeleccionarArchivoVerificar = document.getElementById('btnSeleccionarArchivoVerificar');
+        const btnSeleccionarFirmaVerificar = document.getElementById('btnSeleccionarFirmaVerificar');
+        const btnVerificarFirma = document.getElementById('btnVerificarFirma');
+        const infoArchivoVerificar = document.getElementById('infoArchivoVerificar');
+        const resultadoVerificacion = document.getElementById('resultadoVerificacion');
+        let archivoVerificar = null;
+        let firmaVerificar = null;
+
+        btnSeleccionarArchivoVerificar.addEventListener('click', () => {
+            archivoVerificarInput.click();
+        });
+
+        btnSeleccionarFirmaVerificar.addEventListener('click', () => {
+            firmaVerificarInput.click();
+        });
+
+        archivoVerificarInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                archivoVerificar = file;
+                actualizarInfoVerificacion();
+            }
+        });
+
+        firmaVerificarInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                firmaVerificar = file;
+                actualizarInfoVerificacion();
+            }
+        });
+
+        function actualizarInfoVerificacion() {
+            if (archivoVerificar && firmaVerificar) {
+                const tamañoMB = (archivoVerificar.size / (1024 * 1024)).toFixed(2);
+                infoArchivoVerificar.style.display = 'block';
+                infoArchivoVerificar.innerHTML = `
+                    <strong>Archivo:</strong> ${archivoVerificar.name}<br>
+                    <strong>Firma:</strong> ${firmaVerificar.name}<br>
+                    <strong>Tamaño archivo:</strong> ${tamañoMB} MB
+                `;
+                btnVerificarFirma.disabled = false;
+                resultadoVerificacion.style.display = 'none';
+            } else {
+                let texto = '';
+                if (archivoVerificar) {
+                    texto += `<strong>Archivo:</strong> ${archivoVerificar.name}<br>`;
+                }
+                if (firmaVerificar) {
+                    texto += `<strong>Firma:</strong> ${firmaVerificar.name}<br>`;
+                }
+                if (texto) {
+                    infoArchivoVerificar.style.display = 'block';
+                    infoArchivoVerificar.innerHTML = texto + '<em>Falta seleccionar ' + 
+                        (!archivoVerificar ? 'archivo' : 'firma') + '</em>';
+                } else {
+                    infoArchivoVerificar.style.display = 'none';
+                }
+                btnVerificarFirma.disabled = true;
+            }
+        }
+
+        btnVerificarFirma.addEventListener('click', async () => {
+            if (!archivoVerificar || !firmaVerificar) {
+                alert('Por favor selecciona tanto el archivo como la firma (.sig)');
+                return;
+            }
+
+            btnVerificarFirma.disabled = true;
+            btnVerificarFirma.textContent = 'Verificando...';
+            resultadoVerificacion.style.display = 'block';
+            resultadoVerificacion.innerHTML = '<div class="procesando">⏳ Verificando firma digital...</div>';
+
+            try {
+                const formData = new FormData();
+                formData.append('archivo', archivoVerificar);
+                formData.append('firma', firmaVerificar);
+
+                const response = await fetch('/verificar_firma', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const resultado = await response.json();
+
+                if (resultado.exito) {
+                    const claseResultado = resultado.firma_valida ? 'exito-firma' : 'error-firma';
+                    const icono = resultado.firma_valida ? '✅' : '❌';
+                    
+                    resultadoVerificacion.innerHTML = `
+                        <div class="${claseResultado}">
+                            <h4>${icono} ${resultado.mensaje}</h4>
+                            <p><strong>Archivo:</strong> ${resultado.nombre_archivo}</p>
+                            <p><strong>Firma:</strong> ${resultado.nombre_firma}</p>
+                            <p><strong>Hash SHA-256:</strong> <code>${resultado.hash}</code></p>
+                            ${resultado.firma_valida ? 
+                                '<p style="margin-top: 10px; font-weight: bold; color: #4caf50;">El archivo es auténtico y no ha sido modificado.</p>' :
+                                '<p style="margin-top: 10px; font-weight: bold; color: #f44336;">⚠️ El archivo puede haber sido modificado o la firma no corresponde a este archivo.</p>'
+                            }
+                        </div>
+                    `;
+
+                    agregarMensaje(
+                        `Verificación de firma: ${resultado.mensaje}`,
+                        resultado.firma_valida ? 'sistema' : 'error'
+                    );
+                } else {
+                    throw new Error(resultado.error || 'Error desconocido');
+                }
+            } catch (error) {
+                resultadoVerificacion.innerHTML = `
+                    <div class="error-firma">
+                        <h4>❌ Error al verificar firma</h4>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                agregarMensaje(`Error al verificar firma: ${error.message}`, 'error');
+            } finally {
+                btnVerificarFirma.disabled = false;
+                btnVerificarFirma.textContent = 'Verificar firma';
+            }
+        });
+    </script>
+</body>
+</html>
